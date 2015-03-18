@@ -1,4 +1,4 @@
-ここには東京コスモス電機株式会社（http://tocos-wireless.com/）様が自社の
+ここには東京コスモス電機株式会社（ http://tocos-wireless.com/ ）様が自社の
 ワイヤレス製品用に開発・公開されている以下のソフトウェア資産のコピーを
 配置し、手元でローカルに改変を行ったリソースを併せてコミットしています。
 
@@ -7,7 +7,7 @@ http://tocos-wireless.com/jp/products/TWE-ZERO/index.html
 
 原本のライセンス表記に基づいて取り扱って下さい。
 
-（参考：Samp_Monitor/Parent/Source/Parent.c より引用）
+（参考：Samp_Monitor/EndDevice_Input/Source/EndDevice_Input.c より引用）
 
 /****************************************************************************
  * (C) Tokyo Cosmos Electric, Inc. (TOCOS) - all rights reserved.
