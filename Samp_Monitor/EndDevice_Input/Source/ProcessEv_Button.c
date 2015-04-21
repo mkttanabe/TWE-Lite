@@ -75,6 +75,103 @@ PRSEV_HANDLER_DEF(E_STATE_IDLE, tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
 	}
 }
 
+#ifdef MODIFIED_BY_KLAB
+void sendData(tsEvent *pEv, bool_t doCountUp) {
+	sAppData.inRepeat = TRUE;
+	if (doCountUp) {
+		sAppData.countRepeat++;
+	}
+	V_PRINTF(LB"sendData: countRepeat=%d", sAppData.countRepeat);
+	V_PRINTF(LB"[E_STATE_RUNNING/SNS_COMP]");
+	sAppData.u16frame_count++; // シリアル番号を更新する
+
+	tsTxDataApp sTx;
+	memset(&sTx, 0, sizeof(sTx)); // 必ず０クリアしてから使う！
+	uint8 *q =  sTx.auData;
+
+	sTx.u32SrcAddr = ToCoNet_u32GetSerial();
+
+	sTx.u16DelayMin = 0;
+	sTx.u16DelayMax = 0;
+	sTx.u16RetryDur = 0;
+	sTx.u8Retry = 0;
+
+	if (IS_APPCONF_OPT_TO_ROUTER()) {
+		// ルータがアプリ中で一度受信して、ルータから親機に再配送
+		sTx.u32DstAddr = TOCONET_NWK_ADDR_NEIGHBOUR_ABOVE;
+	} else {
+		// ルータがアプリ中では受信せず、単純に中継する
+		sTx.u32DstAddr = TOCONET_NWK_ADDR_PARENT;
+	}
+
+	// ペイロードの準備
+	S_OCTET('T');
+	S_OCTET(sAppData.sFlash.sData.u8id);
+	S_BE_WORD(sAppData.u16frame_count);
+
+	S_OCTET(sAppData.sFlash.sData.u8mode);	// パケット識別子
+
+	S_OCTET(sAppData.sSns.u8Batt);
+
+	S_BE_WORD(sAppData.sSns.u16Adc1);
+	S_BE_WORD(sAppData.sSns.u16Adc2);
+
+	//	立ち上がりで起動 or 立ち下がりで起動
+	if( sAppData.sFlash.sData.i16param == 1 ){
+		S_OCTET(0x01);
+	} else {
+		S_OCTET(0x00);
+	}
+
+	/*	DIの入力状態を取得	*/
+	uint8 DI_Bitmap = readInput();
+	S_OCTET( DI_Bitmap );
+
+
+	sTx.u8Len = q - sTx.auData; // パケットのサイズ
+	sTx.u8CbId = sAppData.u16frame_count & 0xFF; // TxEvent で通知される番号、送信先には通知されない
+	sTx.u8Seq = sAppData.u16frame_count & 0xFF; // シーケンス番号(送信先に通知される)
+	sTx.u8Cmd = 0; // 0..7 の値を取る。パケットの種別を分けたい時に使用する
+	//sTx.u8Retry = 0x81; // 強制２回送信
+
+	if (IS_APPCONF_OPT_SECURE()) {
+		sTx.bSecurePacket = TRUE;
+	}
+
+	if (ToCoNet_Nwk_bTx(sAppData.pContextNwk, &sTx)) {
+		V_PRINTF(LB"TxOk");
+		ToCoNet_Tx_vProcessQueue(); // 送信処理をタイマーを待たずに実行する
+		ToCoNet_Event_SetState(pEv, E_STATE_APP_WAIT_TX);
+	} else {
+		V_PRINTF(LB"TxFl");
+		ToCoNet_Event_SetState(pEv, E_STATE_APP_SLEEP);
+	}
+	V_PRINTF(" FR=%04X", sAppData.u16frame_count);
+}
+
+/*	パケットを送信する状態	*/
+PRSEV_HANDLER_DEF(E_STATE_RUNNING, tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
+	// DI1 に押しボタン・磁気スイッチを接続の場合
+	if (sAppData.sFlash.sData.u8mode == PKT_ID_BUTTON) {
+		bool_t sts = bPortRead(PORT_INPUT1);
+		if ((sts && sAppData.sFlash.sData.i16param == 1) ||
+			(!sts && sAppData.sFlash.sData.i16param == 0)) {
+			ToCoNet_Event_SetState(pEv, E_STATE_APP_SLEEP);
+		}
+	}
+	if (eEvent == E_EVENT_NEW_STATE) {
+		// ADC の開始
+		vADC_WaitInit();
+		vSnsObj_Process(&sAppData.sADC, E_ORDER_KICK);
+	}
+	if (eEvent == E_ORDER_KICK) {
+		V_PRINTF(LB"[E_STATE_RUNNING/SNS_COMP]");
+		sendData(pEv, FALSE);
+	}
+}
+
+#else // !MODIFIED_BY_KLAB
+
 /*	パケットを送信する状態	*/
 PRSEV_HANDLER_DEF(E_STATE_RUNNING, tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
 	if (eEvent == E_EVENT_NEW_STATE) {
@@ -150,12 +247,28 @@ PRSEV_HANDLER_DEF(E_STATE_RUNNING, tsEvent *pEv, teEvent eEvent, uint32 u32evarg
 		V_PRINTF(" FR=%04X", sAppData.u16frame_count);
 	}
 }
+#endif // MODIFIED_BY_KLAB
 
 /*	送信完了状態	*/
 PRSEV_HANDLER_DEF(E_STATE_APP_WAIT_TX, tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
 	if (eEvent == E_ORDER_KICK) { // 送信完了イベントが来たのでスリープする
-		ToCoNet_Event_SetState(pEv, E_STATE_APP_CHAT_SLEEP); // スリープ状態へ遷移
+#ifdef MODIFIED_BY_KLAB
+		if (sAppData.sFlash.sData.u8mode == PKT_ID_BUTTON) {
+			// DI1 の状態変化に呼応し送信を一度行なった後は すぐにスリープへ移行せず
+			// E_EVENT_TICK_SECOND を利用して所定の回数送信を繰り返す
+			if (sAppData.inRepeat) {
+				if (sAppData.countRepeat >= REPEAT_MAX) {
+					ToCoNet_Event_SetState(pEv, E_STATE_APP_CHAT_SLEEP); // スリープ状態へ遷移
+				}
+			}
+		} else {
+			ToCoNet_Event_SetState(pEv, E_STATE_APP_CHAT_SLEEP); // スリープ状態へ遷移
+		}
 	}
+#else
+	ToCoNet_Event_SetState(pEv, E_STATE_APP_CHAT_SLEEP); // スリープ状態へ遷移
+#endif
+
 }
 
 /*
@@ -185,6 +298,10 @@ PRSEV_HANDLER_DEF(E_STATE_APP_CHAT_SLEEP, tsEvent *pEv, teEvent eEvent, uint32 u
 
 /*	スリープをする状態	*/
 PRSEV_HANDLER_DEF(E_STATE_APP_SLEEP, tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
+#ifdef MODIFIED_BY_KLAB
+	sAppData.inRepeat = FALSE;
+	sAppData.countRepeat = 0;
+#endif
 	if (eEvent == E_EVENT_NEW_STATE) {
 		// Sleep は必ず E_EVENT_NEW_STATE 内など１回のみ呼び出される場所で呼び出す。
 		V_PRINTF(LB"Sleeping...");
@@ -234,6 +351,14 @@ static const tsToCoNet_Event_StateHandler asStateFuncTbl[] = {
  * @param u32evarg
  */
 static void vProcessEvCore(tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
+#ifdef MODIFIED_BY_KLAB
+	if (eEvent == E_EVENT_TICK_SECOND) {
+		// 送信リピート中ならここで送信を実行
+		if (sAppData.inRepeat) {
+			sendData(pEv, TRUE);
+		}
+	}
+#endif
 	ToCoNet_Event_StateExec(asStateFuncTbl, pEv, eEvent, u32evarg);
 }
 

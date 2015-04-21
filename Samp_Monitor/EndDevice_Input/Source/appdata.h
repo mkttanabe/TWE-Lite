@@ -20,6 +20,8 @@
 #ifndef APPDATA_H_
 #define APPDATA_H_
 
+#define MODIFIED_BY_KLAB
+
 #include <jendefs.h>
 
 #include "config.h"
@@ -70,8 +72,15 @@ typedef struct {
 	// その他
 	tsFlash sFlash; //!< フラッシュの情報
 	bool_t bFlashLoaded; //!< フラッシュにデータが合った場合は TRUE
+#ifdef MODIFIED_BY_KLAB
+	bool_t inRepeat; // リピート送信中
+	int countRepeat; // リピート済回数
+#endif
 } tsAppData_Ed;
 
 extern tsAppData_Ed sAppData_Ed;
 
+#ifdef MODIFIED_BY_KLAB
+#define REPEAT_MAX 9 // リピート送信回数
+#endif
 #endif /* APPDATA_H_ */
