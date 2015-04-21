@@ -8,6 +8,8 @@
 #ifndef APPDATA_H_
 #define APPDATA_H_
 
+#define MODIFIED_BY_KLAB
+
 #include <jendefs.h>
 #include "ToCoNet.h"
 #include "flash.h"
@@ -35,6 +37,9 @@ typedef struct {
 	uint8 u8DebugLevel;
 
 	uint8 u8DO_State;	//	DOの状態(0:Hi, 1:Lo, それ以外:未定義)
+#ifdef MODIFIED_BY_KLAB
+	bool_t received; // 受信実績有無フラグ (cbAppColdStart 内でのみ初期化)
+#endif
 } tsAppData_Pa;
 extern tsAppData_Pa sAppData_Pa;
 

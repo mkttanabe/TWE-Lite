@@ -258,6 +258,13 @@ void cbToCoNet_vRxEvent(tsRxDataApp *pRx) {
 
 		if( sRxPktInfo.u8pkt == PKT_ID_BUTTON ){
 			vLED_Toggle();
+#ifdef MODIFIED_BY_KLAB
+			// 子機のセンサモードが押しボタン・磁気スイッチの場合は
+			// 受信実績フラグを立て DO4 の状態を変化させる
+			// (DO4 には電子ブザーの接続を想定)
+			sAppData.received = TRUE;
+			vPortSet_TrueAsLo(PORT_OUT4, bPortRead(PORT_OUT1));
+#endif
 		}
 
 		// 出力用の関数を呼び出す
@@ -391,6 +398,11 @@ static void vInitHardware(int f_warm_start) {
 	vPortSetHi( PORT_OUT2 );
 	vPortAsOutput( PORT_OUT2 );
 
+#ifdef MODIFIED_BY_KLAB
+	vPortSetHi( PORT_OUT4 );
+	vPortAsOutput( PORT_OUT4 );
+#endif
+
 	// LCD の設定
 #ifdef USE_LCD
 	vLcdInit();
@@ -440,6 +452,14 @@ static void vProcessEvCore(tsEvent *pEv, teEvent eEvent, uint32 u32evarg) {
 
 	if (eEvent == E_EVENT_TICK_SECOND) {
 		u32sec++;
+#ifdef MODIFIED_BY_KLAB
+		// 子機のセンサモードが押しボタン・磁気スイッチかつ
+		// 受信実績があればリセットされるまで DO1 の LED 点滅を継続する
+		// (受信有無を事後に視認するための便宜)
+		if (sAppData.received) {
+			vPortSet_TrueAsLo(PORT_OUT1, !bPortRead(PORT_OUT1));
+		}
+#endif
 	}
 
 	switch (pEv->eState) {
